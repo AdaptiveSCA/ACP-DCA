@@ -1,6 +1,6 @@
 # ACP-DCA simulation against SE-SPECk and IF-SPECK
 
-This is a script for ACP-DCA simulation against SE-SPECk and IF-SPECK.
+This is a script for ACP-DCA simulation against SE-SPECK and IF-SPECK.
 
 # Experiment Environment
 Windows 10
