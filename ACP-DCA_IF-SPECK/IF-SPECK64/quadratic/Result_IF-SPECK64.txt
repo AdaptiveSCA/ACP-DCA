@@ -1,0 +1,1 @@
+key guess: 3020100, encoding count: 64

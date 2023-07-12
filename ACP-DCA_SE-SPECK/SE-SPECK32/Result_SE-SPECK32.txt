@@ -1,0 +1,8 @@
+key guess: 00, encoding count: 8
+key guess: 0c, encoding count: 8
+key guess: 10, encoding count: 10
+key guess: 20, encoding count: 12
+key guess: 100, encoding count: 19
+------
+ACP-DCA against SE-SPECK32 recoverd key: 100, encoding count: 19
+ACP-DCA against SE-SPECK32 recoverd key count: 1

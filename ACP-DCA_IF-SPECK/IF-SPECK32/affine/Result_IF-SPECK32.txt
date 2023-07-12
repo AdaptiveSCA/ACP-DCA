@@ -1,0 +1,4 @@
+key guess: 100, encoding count: 32
+------
+ACP-DCA against IF-SPECK32 recoverd key: 100, encoding count: 32
+ACP-DCA against IF-SPECK32 recoverd key count: 1

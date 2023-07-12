@@ -1,0 +1,6 @@
+key guess: 3020100, encoding count: 64
+key guess: 3020180, encoding count: 64
+------
+ACP-DCA against IF-SPECK64 recoverd key: 3020100, encoding count: 64
+ACP-DCA against IF-SPECK64 recoverd key: 3020180, encoding count: 64
+ACP-DCA against IF-SPECK64 recoverd key count: 2

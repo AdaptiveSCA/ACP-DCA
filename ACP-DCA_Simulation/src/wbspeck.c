@@ -77,9 +77,9 @@ u64 ROL128(u64 x, int r)
 void ACP_DCA32()
 {
     u16 x0, x1, y0, y1, z0, z1;
-    int k, x, j, s, ts, l, b;
+    int k, x, j, s, ts, l, b, bit;
     u32 state;
-    u16 key[4] = {0xe318, 0x2610, 0x7a08, 0x1918};
+    u16 key[4] = {0x1918, 0x1110, 0x0908, 0x0100};
     u16 roundkey[SPECK_ROUNDS];
     Key_expand32(key, roundkey);
     ////
@@ -91,12 +91,105 @@ void ACP_DCA32()
     Aff32 Aff, Aff_inv;
     genaffinepairM32(&Aff, &Aff_inv);
     u32 map[pt]; 
-    
+    FILE *fp = NULL;
+
+    uint8_t Htrace[pt][9];
+    uint8_t temp;
+    uint8_t trail[1280][3];// Gaussian trail
+    for(x = 0; x < pt; x++)
+    {
+        Htrace[x][0] = 1;
+        for(bit = 1; bit < 9; bit++)
+        {
+            if(x & idM8[bit - 1]) Htrace[x][bit] = 1;
+            else Htrace[x][bit] = 0;
+        }
+    }
+    int Gauss_time = 0; // 1277
+    //  Gaussian Elimination
+    for(int i = 0; i < 9; i++)
+    {
+        if(Htrace[i][i])
+        {
+            for(int j = i + 1; j < pt; j++)
+            {
+                if(Htrace[j][i])
+                { 
+                    for(int r = 0; r < 9; r++)
+                    {
+                        Htrace[j][r] ^= Htrace[i][r];
+                    }
+                    trail[Gauss_time][0] = 1; //addition
+                    trail[Gauss_time][1] = j;
+                    trail[Gauss_time][2] = i;
+                    Gauss_time++;
+                }
+            }
+        }
+        else
+        {
+            int flag = 0;
+            for(int j = i + 1; j < pt; j++)
+            {
+                if(Htrace[j][i])
+                {
+                    for(int r = 0; r < 9; r++)
+                    {
+                        temp = Htrace[i][r];
+                        Htrace[i][r] = Htrace[j][r];
+                        Htrace[j][r] = temp;
+                    }
+                    trail[Gauss_time][0] = 0; //swap
+                    trail[Gauss_time][1] = j;
+                    trail[Gauss_time][2] = i;
+                    Gauss_time++;
+
+                    flag = 1;
+                    break;
+                }
+            }
+            if(flag)
+            {
+                for(int j = i + 1; j < pt; j++)
+                {
+                    if(Htrace[j][i])
+                    { 
+                        for(int r = 0; r < 9; r++)
+                        {
+                            Htrace[j][r] ^= Htrace[i][r];
+                        }
+                        trail[Gauss_time][0] = 1; //addition
+                        trail[Gauss_time][1] = j;
+                        trail[Gauss_time][2] = i;
+                        Gauss_time++;
+                    }
+                }
+            }
+        }
+    }
+    // printf("Gauss_time: %d\n", Gauss_time);
+    // return ;
+
+    // the rank of A
+    int rA = pt;
+    for(int i = pt - 1; i >= 0; i--)
+    {
+        int allzero = 1;
+        for(int j = 0; j < 9; j++)
+        {
+            if(Htrace[i][j]) allzero = 0;
+        }
+        if(allzero) rA--;
+        else break;
+    }
+    // printf("rA: %d\n", rA);
+    // return ;
+
     u16 key_guess[10000] = {0};
-    int k_count = 0;
-    double k_max = 0.0;
+    int k_max = 0;
     int knum = 0;
-    for(k = ktb16; k < kte16; k++) // key
+    uint8_t vector[pt];
+    for(k = ktb16; k <= kte16; k++) // key
     {
         for(x = 0; x < pt; x++) // adaptive inputs
         {
@@ -113,115 +206,194 @@ void ACP_DCA32()
             map[x] = state;
             map[x] = affineU32(Aff, state); // affine encoding
         }
-        double k_score = 0.0;
-        double L_score[pt] = {0.0};
-        int l_count = 0;
-        double l_max = 0.0;
-        for(l = 1; l < pt; l++)
-        {  
-            double score = 0.0;
-            double j_max = 0.0;
-            for(j = 0; j < tb32; j++) // samples of traces
-            {
-                int Nf0 = 0, Nf1 = 0, Ng0 = 0, Ng1 = 0, N00 = 0, N01 = 0, N10 = 0, N11 = 0;
-                for(x = 0; x < pt; x++)
-                { 
-                    if(map[x] & idM32[j]) ts = 1; // traces
-                    else ts = 0;
-                    ////// correlation
-                    f = ts;
-                    if(f) Nf1++;
-                    else Nf0++;
-                    
-                    g = xor[l & x];
-                    if(g) Ng1++;
-                    else Ng0++;
-                    
-                    if(f == 1 && g == 1) N11++;
-                    else if(f == 0 & g == 0) N00++;
-                    else if(f == 1 & g == 0) N10++;
-                    else N01++;
-                }
-                if(Nf1 && Nf0 && Ng1 && Ng0) score = abs((N11 * N00 - N10 * N01)) * 1.0 / (sqrt(Nf1) * sqrt(Nf0) * sqrt(Ng1) * sqrt(Ng0));
-                else score = 0.0;
-                if(score > j_max) j_max = score;
-            }
-            L_score[l] = j_max;
-            if(L_score[l] > l_max) l_max = L_score[l];
-        }
-        k_score = l_max;
-        if(fabs(k_score - k_max) < EPS)
+        int k_count = 0;
+        for(j = 0; j < tb32; j++) // samples of traces
         {
-            for(l = 1; l < pt; l++)
+            for(x = 0; x < pt; x++)
+            { 
+                if(map[x] & idM32[j]) vector[x] = 1; // traces
+                else vector[x] = 0;
+            }
+            //  Gaussian Elimination
+            for(int i = 0; i < Gauss_time; i++)
             {
-                if(fabs(L_score[l] - l_max) < EPS) // each encoding: key guess
+                if(trail[i][0]) // addition
                 {
-                    l_count++;
+                    vector[trail[i][1]] ^= vector[trail[i][2]];
+                }
+                else // swap
+                {
+                    temp = vector[trail[i][2]];
+                    vector[trail[i][2]] = vector[trail[i][1]];
+                    vector[trail[i][1]] = temp;
                 }
             }
-            if(l_count > k_count)
+            
+            // Gauss Over
+            int rAb = pt;
+            for(int i = pt - 1; i >= 0; i--)
             {
-                k_count = l_count;
-                knum = 0;
-                key_guess[knum] = k;
-                knum++;
-                printf("key guess: %.2x, encoding count: %d, correlation: %f\n", k, l_count, k_score);
+                int allzero = 1;
+                if(vector[i]) allzero = 0;
+                if(allzero) rAb--;
+                else break;
             }
-            else if(l_count == k_count)
+            if(rA >= rAb) // has a solusion
             {
-                key_guess[knum] = k;
-                knum++;
-                printf("key guess: %.2x, encoding count: %d, correlation: %f\n", k, l_count, k_score);
+                k_count++;
             }
         }
-        else if(k_score > k_max) 
+        if(k_count && (k_count == k_max))
         {
-            k_max = k_score; 
-            knum = 0;
-            for(l = 1; l < pt; l++)
-            {
-                if(fabs(L_score[l] - l_max) < EPS) // each encoding: key guess
-                {
-                    l_count++;
-                }
-            }
-            k_count = l_count;
             key_guess[knum] = k;
             knum++;
-            printf("key guess: %.2x, encoding count: %d, correlation: %f\n", k, l_count, k_score);
+            fp = fopen("Result_SPECK32.txt", "a");
+            fprintf(fp, "key guess: %.2x, encoding count: %d\n", k, k_count);
+            printf("key guess: %.2x, encoding count: %d\n", k, k_count);
+            fclose(fp);
+        }
+        else if(k_count && (k_count > k_max))
+        {
+            k_max = k_count; 
+            knum = 0;
+            key_guess[knum] = k;
+            knum++;
+            fp = fopen("Result_SPECK32.txt", "a");
+            fprintf(fp, "key guess: %.2x, encoding count: %d\n", k, k_count);
+            printf("key guess: %.2x, encoding count: %d\n", k, k_count);
+            fclose(fp);
         }
     }
-    printf("------\n");  
+    fp = fopen("Result_SPECK32.txt", "a");
+    fprintf(fp, "------\n");
+    printf("------\n");
+    fclose(fp);  
     for(k = 0; k < knum; k++)
     {
-        printf("simulation SPECK32 recoverd key: %.2x, correlation: %f, encoding count: %d\n", key_guess[k], k_max, k_count);
+        fp = fopen("Result_SPECK32.txt", "a");
+        fprintf(fp, "simulation SPECK32 recoverd key: %.2x, encoding count: %d\n", key_guess[k], k_max);
+        printf("simulation SPECK32 recoverd key: %.2x, encoding count: %d\n", key_guess[k], k_max);
+        fclose(fp); 
         key_count++;
     }
+    fp = fopen("Result_SPECK32.txt", "a");
+    fprintf(fp, "simulation SPECK32 recoverd key count: %d\n", key_count);
     printf("simulation SPECK32 recoverd key count: %d\n", key_count);
+    fclose(fp); 
 }
 
 void ACP_DCA64()
 {
     u32 x0, x1, y0, y1, z0, z1;
-    int k, x, j, s, ts, l, b;
+    int k, x, j, s, ts, l, b, bit;
     u64 state;
-    u32 key[4] = {0xe318e318, 0x26102610, 0x7a087a08, 0x13121110};
+    u32 key[4] = {0x1b1a1918, 0x13121110, 0x0b0a0908, 0x03020100};
     u32 roundkey[SPECK_ROUNDS];
     Key_expand64(key, roundkey);
     ////
     int f = 0, g = 0;
-    static const int ktb32 = 0x13100000;
-    static const int  kte32 = 0x131fffff;
+    static const int ktb32 = 0x02000000;
+    static const int kte32 = 0x03ffffff;
     int key_count = 0;
 
     Aff64 Aff, Aff_inv;
     genaffinepairM64(&Aff, &Aff_inv);
     u64 map[pt]; 
+    FILE *fp = NULL;
     
+    uint8_t Htrace[pt][9];
+    uint8_t temp;
+    uint8_t trail[1280][3];// Gaussian trail
+    for(x = 0; x < pt; x++)
+    {
+        Htrace[x][0] = 1;
+        for(bit = 1; bit < 9; bit++)
+        {
+            if(x & idM8[bit - 1]) Htrace[x][bit] = 1;
+            else Htrace[x][bit] = 0;
+        }
+    }
+    int Gauss_time = 0; // 1277
+    //  Gaussian Elimination
+    for(int i = 0; i < 9; i++)
+    {
+        if(Htrace[i][i])
+        {
+            for(int j = i + 1; j < pt; j++)
+            {
+                if(Htrace[j][i])
+                { 
+                    for(int r = 0; r < 9; r++)
+                    {
+                        Htrace[j][r] ^= Htrace[i][r];
+                    }
+                    trail[Gauss_time][0] = 1; //addition
+                    trail[Gauss_time][1] = j;
+                    trail[Gauss_time][2] = i;
+                    Gauss_time++;
+                }
+            }
+        }
+        else
+        {
+            int flag = 0;
+            for(int j = i + 1; j < pt; j++)
+            {
+                if(Htrace[j][i])
+                {
+                    for(int r = 0; r < 9; r++)
+                    {
+                        temp = Htrace[i][r];
+                        Htrace[i][r] = Htrace[j][r];
+                        Htrace[j][r] = temp;
+                    }
+                    trail[Gauss_time][0] = 0; //swap
+                    trail[Gauss_time][1] = j;
+                    trail[Gauss_time][2] = i;
+                    Gauss_time++;
+
+                    flag = 1;
+                    break;
+                }
+            }
+            if(flag)
+            {
+                for(int j = i + 1; j < pt; j++)
+                {
+                    if(Htrace[j][i])
+                    { 
+                        for(int r = 0; r < 9; r++)
+                        {
+                            Htrace[j][r] ^= Htrace[i][r];
+                        }
+                        trail[Gauss_time][0] = 1; //addition
+                        trail[Gauss_time][1] = j;
+                        trail[Gauss_time][2] = i;
+                        Gauss_time++;
+                    }
+                }
+            }
+        }
+    }
+    // the rank of A
+    int rA = pt;
+    for(int i = pt - 1; i >= 0; i--)
+    {
+        int allzero = 1;
+        for(int j = 0; j < 9; j++)
+        {
+            if(Htrace[i][j]) allzero = 0;
+        }
+        if(allzero) rA--;
+        else break;
+    }
+    // printf("rA: %d\n", rA);
+    // return ;
+
     u32 key_guess[10000] = {0};
-    int k_count = 0;
-    double k_max = 0.0;
+    int k_max = 0;
     int knum = 0;
+    uint8_t vector[pt];
     for(k = ktb32; k < kte32; k++) // key
     {
         for(x = 0; x < pt; x++) // adaptive inputs
@@ -239,117 +411,196 @@ void ACP_DCA64()
             map[x] = state;
             map[x] = affineU64(Aff, state); // affine encoding
         }
-        double k_score = 0.0;
-        double L_score[pt] = {0.0};
-        int l_count = 0;
-        double l_max = 0.0;
-        for(l = 1; l < pt; l++)
-        {  
-            double score = 0.0;
-            double j_max = 0.0;
-            for(j = 0; j < tb64; j++) // samples of traces
-            {
-                int Nf0 = 0, Nf1 = 0, Ng0 = 0, Ng1 = 0, N00 = 0, N01 = 0, N10 = 0, N11 = 0;
-                for(x = 0; x < pt; x++)
-                { 
-                    if(map[x] & idM64[j]) ts = 1; // traces
-                    else ts = 0;
-                    ////// correlation
-                    f = ts;
-                    if(f) Nf1++;
-                    else Nf0++;
-                    
-                    g = xor[l & x];
-                    if(g) Ng1++;
-                    else Ng0++;
-                    
-                    if(f == 1 && g == 1) N11++;
-                    else if(f == 0 & g == 0) N00++;
-                    else if(f == 1 & g == 0) N10++;
-                    else N01++;
-                }
-                if(Nf1 && Nf0 && Ng1 && Ng0) score = abs((N11 * N00 - N10 * N01)) * 1.0 / (sqrt(Nf1) * sqrt(Nf0) * sqrt(Ng1) * sqrt(Ng0));
-                else score = 0.0;
-                if(score > j_max) j_max = score;
-            }
-            L_score[l] = j_max;
-            if(L_score[l] > l_max) l_max = L_score[l];
-        }
-        k_score = l_max;
-        if(fabs(k_score - k_max) < EPS)
+        int k_count = 0;
+        for(j = 0; j < tb64; j++) // samples of traces
         {
-            for(l = 1; l < pt; l++)
+            for(x = 0; x < pt; x++)
+            { 
+                if(map[x] & idM64[j]) vector[x] = 1; // traces
+                else vector[x] = 0;
+            }
+            //  Gaussian Elimination
+            for(int i = 0; i < Gauss_time; i++)
             {
-                if(fabs(L_score[l] - l_max) < EPS) // each encoding: key guess
+                if(trail[i][0]) // addition
                 {
-                    l_count++;
+                    vector[trail[i][1]] ^= vector[trail[i][2]];
+                }
+                else // swap
+                {
+                    temp = vector[trail[i][2]];
+                    vector[trail[i][2]] = vector[trail[i][1]];
+                    vector[trail[i][1]] = temp;
                 }
             }
-            if(l_count > k_count)
+            
+            // Gauss Over
+            int rAb = pt;
+            for(int i = pt - 1; i >= 0; i--)
             {
-                k_count = l_count;
-                knum = 0;
-                key_guess[knum] = k;
-                knum++;
-                printf("key guess: %.2x, encoding count: %d, correlation: %f\n", k, l_count, k_score);
+                int allzero = 1;
+                if(vector[i]) allzero = 0;
+                if(allzero) rAb--;
+                else break;
             }
-            else if(l_count == k_count)
+            if(rA >= rAb) // has a solusion
             {
-                key_guess[knum] = k;
-                knum++;
-                printf("key guess: %.2x, encoding count: %d, correlation: %f\n", k, l_count, k_score);
+                k_count++;
             }
         }
-        else if(k_score > k_max) 
+        if(k_count && (k_count == k_max))
         {
-            k_max = k_score; 
-            knum = 0;
-            for(l = 1; l < pt; l++)
-            {
-                if(fabs(L_score[l] - l_max) < EPS) // each encoding: key guess
-                {
-                    l_count++;
-                }
-            }
-            k_count = l_count;
             key_guess[knum] = k;
             knum++;
-            printf("key guess: %.2x, encoding count: %d, correlation: %f\n", k, l_count, k_score);
+            fp = fopen("Result_SPECK64.txt", "a");
+            fprintf(fp, "key guess: %.2x, encoding count: %d\n", k, k_count);
+            printf("key guess: %.2x, encoding count: %d\n", k, k_count);
+            fclose(fp);
+        }
+        else if(k_count && (k_count > k_max))
+        {
+            k_max = k_count; 
+            knum = 0;
+            key_guess[knum] = k;
+            knum++;
+            fp = fopen("Result_SPECK64.txt", "a");
+            fprintf(fp, "key guess: %.2x, encoding count: %d\n", k, k_count);
+            printf("key guess: %.2x, encoding count: %d\n", k, k_count);
+            fclose(fp);
         }
     }
+    fp = fopen("Result_SPECK64.txt", "a");
+    fprintf(fp, "------\n");
     printf("------\n");  
+    fclose(fp);
     for(k = 0; k < knum; k++)
     {
-        printf("simulation SPECK64 recoverd key: %.2x, correlation: %f, encoding count: %d\n", key_guess[k], k_max, k_count);
+        fp = fopen("Result_SPECK64.txt", "a");
+        fprintf(fp, "simulation SPECK64 recoverd key: %.2x, encoding count: %d\n", key_guess[k], k_max);
+        printf("simulation SPECK64 recoverd key: %.2x, encoding count: %d\n", key_guess[k], k_max);
+        fclose(fp);
         key_count++;
     }
+    fp = fopen("Result_SPECK64.txt", "a");
+    fprintf(fp, "simulation SPECK64 recoverd key count: %d\n", key_count);
     printf("simulation SPECK64 recoverd key count: %d\n", key_count);
+    fclose(fp);
 }
 
 void ACP_DCA128()
 {
     u64 x0, x1, y0, y1, z0, z1;
-    int x, j, s, ts, l, b;
+    int x, j, s, ts, l, b, bit;
     u64 k;
     V128 state1;
     V128 state2;
-    u64 key[4] = {0xe318e318, 0x26102610, 0x7a087a08, 0x0f0e0d0c0b0a0908};
+    u64 key[4] = {0x1f1e1d1c1b1a1918, 0x1716151413121110, 0x0f0e0d0c0b0a0908, 0x0706050403020100};
     u64 roundkey[SPECK_ROUNDS];
     Key_expand128(key, roundkey);
     ////
     int f = 0, g = 0;
-    static const u64 ktb64 = 0x0f0e0d0c0b0a0000;
-    static const u64 kte64 = 0x0f0e0d0c0b0fffff;
+    static const u64 ktb64 = 0x0706050403000000;
+    static const u64 kte64 = 0x0706050403ffffff;
     int key_count = 0;
 
     Aff128 Aff, Aff_inv;
     genaffinepairM128(&Aff, &Aff_inv);
     u64 map[pt][2]; 
+    FILE *fp = NULL;
+
+    uint8_t Htrace[pt][9];
+    uint8_t temp;
+    uint8_t trail[1280][3];// Gaussian trail
+    for(x = 0; x < pt; x++)
+    {
+        Htrace[x][0] = 1;
+        for(bit = 1; bit < 9; bit++)
+        {
+            if(x & idM8[bit - 1]) Htrace[x][bit] = 1;
+            else Htrace[x][bit] = 0;
+        }
+    }
+    int Gauss_time = 0; // 1277
+    //  Gaussian Elimination
+    for(int i = 0; i < 9; i++)
+    {
+        if(Htrace[i][i])
+        {
+            for(int j = i + 1; j < pt; j++)
+            {
+                if(Htrace[j][i])
+                { 
+                    for(int r = 0; r < 9; r++)
+                    {
+                        Htrace[j][r] ^= Htrace[i][r];
+                    }
+                    trail[Gauss_time][0] = 1; //addition
+                    trail[Gauss_time][1] = j;
+                    trail[Gauss_time][2] = i;
+                    Gauss_time++;
+                }
+            }
+        }
+        else
+        {
+            int flag = 0;
+            for(int j = i + 1; j < pt; j++)
+            {
+                if(Htrace[j][i])
+                {
+                    for(int r = 0; r < 9; r++)
+                    {
+                        temp = Htrace[i][r];
+                        Htrace[i][r] = Htrace[j][r];
+                        Htrace[j][r] = temp;
+                    }
+                    trail[Gauss_time][0] = 0; //swap
+                    trail[Gauss_time][1] = j;
+                    trail[Gauss_time][2] = i;
+                    Gauss_time++;
+
+                    flag = 1;
+                    break;
+                }
+            }
+            if(flag)
+            {
+                for(int j = i + 1; j < pt; j++)
+                {
+                    if(Htrace[j][i])
+                    { 
+                        for(int r = 0; r < 9; r++)
+                        {
+                            Htrace[j][r] ^= Htrace[i][r];
+                        }
+                        trail[Gauss_time][0] = 1; //addition
+                        trail[Gauss_time][1] = j;
+                        trail[Gauss_time][2] = i;
+                        Gauss_time++;
+                    }
+                }
+            }
+        }
+    }
+    // the rank of A
+    int rA = pt;
+    for(int i = pt - 1; i >= 0; i--)
+    {
+        int allzero = 1;
+        for(int j = 0; j < 9; j++)
+        {
+            if(Htrace[i][j]) allzero = 0;
+        }
+        if(allzero) rA--;
+        else break;
+    }
+    // printf("rA: %d\n", rA);
+    // return ;
     
     u64 key_guess[10000] = {0};
-    int k_count = 0;
-    double k_max = 0.0;
+    int k_max = 0;
     int knum = 0;
+    uint8_t vector[pt];
     for(k = ktb64; k < kte64; k++) // key
     {
         for(x = 0; x < pt; x++) // adaptive inputs
@@ -369,97 +620,86 @@ void ACP_DCA128()
             map[x][0] = state2.V[0] ^ Aff.Vec.V[0];//add
             map[x][1] = state2.V[1] ^ Aff.Vec.V[1];
         }
-        double k_score = 0.0;
-        double L_score[pt] = {0.0};
-        int l_count = 0;
-        double l_max = 0.0;
-        for(l = 1; l < pt; l++)
-        {  
-            double score = 0.0;
-            double j_max = 0.0;
-            for(j = 0; j < tb128; j++) // samples of traces
-            {
-                int Nf0 = 0, Nf1 = 0, Ng0 = 0, Ng1 = 0, N00 = 0, N01 = 0, N10 = 0, N11 = 0;
-                for(x = 0; x < pt; x++)
-                { 
-                    if(j < 64)
-                    {    
-                        if(map[x][0] & idM64[j]) ts = 1; // traces
-                        else ts = 0;
-                    }
-                    else
-                    {    
-                        if(map[x][1] & idM64[j - 64]) ts = 1; // traces
-                        else ts = 0;
-                    }
-                    ////// correlation
-                    f = ts;
-                    if(f) Nf1++;
-                    else Nf0++;
-                    
-                    g = xor[l & x];
-                    if(g) Ng1++;
-                    else Ng0++;
-                    
-                    if(f == 1 && g == 1) N11++;
-                    else if(f == 0 & g == 0) N00++;
-                    else if(f == 1 & g == 0) N10++;
-                    else N01++;
-                }
-                if(Nf1 && Nf0 && Ng1 && Ng0) score = abs((N11 * N00 - N10 * N01)) * 1.0 / (sqrt(Nf1) * sqrt(Nf0) * sqrt(Ng1) * sqrt(Ng0));
-                else score = 0.0;
-                if(score > j_max) j_max = score;
-            }
-            L_score[l] = j_max;
-            if(L_score[l] > l_max) l_max = L_score[l];
-        }
-        k_score = l_max;
-        if(fabs(k_score - k_max) < EPS)
+        int k_count = 0;
+        for(j = 0; j < tb128; j++) // samples of traces
         {
-            for(l = 1; l < pt; l++)
-            {
-                if(fabs(L_score[l] - l_max) < EPS) // each encoding: key guess
-                {
-                    l_count++;
+            for(x = 0; x < pt; x++)
+            { 
+                if(j < 64)
+                {    
+                    if(map[x][0] & idM64[j]) vector[x] = 1; // traces
+                    else vector[x] = 0;
+                }
+                else
+                {    
+                    if(map[x][1] & idM64[j - 64]) vector[x] = 1; // traces
+                    else vector[x] = 0;
                 }
             }
-            if(l_count > k_count)
+            //  Gaussian Elimination
+            for(int i = 0; i < Gauss_time; i++)
             {
-                k_count = l_count;
-                knum = 0;
-                key_guess[knum] = k;
-                knum++;
-                printf("key guess: %llx, encoding count: %d, correlation: %f\n", k, l_count, k_score);
+                if(trail[i][0]) // addition
+                {
+                    vector[trail[i][1]] ^= vector[trail[i][2]];
+                }
+                else // swap
+                {
+                    temp = vector[trail[i][2]];
+                    vector[trail[i][2]] = vector[trail[i][1]];
+                    vector[trail[i][1]] = temp;
+                }
             }
-            else if(l_count == k_count)
+            
+            // Gauss Over
+            int rAb = pt;
+            for(int i = pt - 1; i >= 0; i--)
             {
-                key_guess[knum] = k;
-                knum++;
-                printf("key guess: %llx, encoding count: %d, correlation: %f\n", k, l_count, k_score);
+                int allzero = 1;
+                if(vector[i]) allzero = 0;
+                if(allzero) rAb--;
+                else break;
+            }
+            if(rA >= rAb) // has a solusion
+            {
+                k_count++;
             }
         }
-        else if(k_score > k_max) 
+        if(k_count && (k_count == k_max))
         {
-            k_max = k_score; 
-            knum = 0;
-            for(l = 1; l < pt; l++)
-            {
-                if(fabs(L_score[l] - l_max) < EPS) // each encoding: key guess
-                {
-                    l_count++;
-                }
-            }
-            k_count = l_count;
             key_guess[knum] = k;
             knum++;
-            printf("key guess: %llx, encoding count: %d, correlation: %f\n", k, l_count, k_score);
+            fp = fopen("Result_SPECK128.txt", "a");
+            fprintf(fp, "key guess: %llx, encoding count: %d\n", k, k_count);
+            printf("key guess: %llx, encoding count: %d\n", k, k_count);
+            fclose(fp);
         }
-    } 
-    printf("------\n");  
+        else if(k_count && (k_count > k_max))
+        {
+            k_max = k_count; 
+            knum = 0;
+            key_guess[knum] = k;
+            knum++;
+            fp = fopen("Result_SPECK128.txt", "a");
+            fprintf(fp, "key guess: %llx, encoding count: %d\n", k, k_count);
+            printf("key guess: %llx, encoding count: %d\n", k, k_count);
+            fclose(fp);
+        }
+    }
+    fp = fopen("Result_SPECK128.txt", "a");
+    fprintf(fp, "------\n");
+    printf("------\n");
+    fclose(fp);
     for(k = 0; k < knum; k++)
     {
-        printf("simulation SPECK128 recoverd key: %llx, correlation: %f, encoding count: %d\n", key_guess[k], k_max, k_count);
+        fp = fopen("Result_SPECK128.txt", "a");
+        fprintf(fp, "simulation SPECK128 recoverd key: %llx, encoding count: %d\n", key_guess[k], k_max);
+        printf("simulation SPECK128 recoverd key: %llx, encoding count: %d\n", key_guess[k], k_max);
+        fclose(fp);
         key_count++;
     }
+    fp = fopen("Result_SPECK128.txt", "a");
+    fprintf(fp, "simulation SPECK128 recoverd key count: %d\n", key_count);
     printf("simulation SPECK128 recoverd key count: %d\n", key_count);
+    fclose(fp);
 }

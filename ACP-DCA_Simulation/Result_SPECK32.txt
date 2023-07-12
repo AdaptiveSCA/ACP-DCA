@@ -1,0 +1,4 @@
+key guess: 100, encoding count: 32
+------
+simulation SPECK32 recoverd key: 100, encoding count: 32
+simulation SPECK32 recoverd key count: 1

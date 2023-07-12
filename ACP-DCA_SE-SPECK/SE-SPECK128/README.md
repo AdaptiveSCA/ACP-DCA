@@ -11,7 +11,7 @@ Intel(R) Core(TM) i7-8700K CPU @ 3.70GHz   3.70 GHz
 
 gcc version 8.2.0 (MinGW.org GCC-8.2.0-3)
 
-cmake version 3.18.3
+cmake version 3.21.1
 
 # Build
 

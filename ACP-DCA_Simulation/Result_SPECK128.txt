@@ -1,0 +1,14 @@
+key guess: 706050403000100, encoding count: 52
+key guess: 706050403000180, encoding count: 52
+key guess: 70605040300fe7e, encoding count: 65
+key guess: 70605040300fefe, encoding count: 65
+key guess: 706050403010100, encoding count: 65
+key guess: 706050403010180, encoding count: 65
+key guess: 70605040301fe7e, encoding count: 70
+key guess: 70605040301fefe, encoding count: 70
+key guess: 706050403020100, encoding count: 128
+key guess: 706050403020180, encoding count: 128
+------
+simulation SPECK128 recoverd key: 706050403020100, encoding count: 128
+simulation SPECK128 recoverd key: 706050403020180, encoding count: 128
+simulation SPECK128 recoverd key count: 2
